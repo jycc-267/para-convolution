@@ -2,11 +2,25 @@
 
 The project implements three versions of image editor that apply convolution effects on given images. The sequential version processes images one at a time without parallelism. Each image is fully loaded, effects are applied in-order using sequential convolution operations, and results are saved before moving to the next image. This version serves as the baseline for performance comparisons. The parfiles version spawns goroutines that compete to pull image tasks from a shared task queue protected by a TAS lock. After a goroutine acquires the lock, the image task along with a sequence of effects will then be executed independently. The parslices version processes an individual image by splitting it into slices. This version has each goroutine apply the same effect on their own slices, wait for all slices to be completed between effects, and move on to the next effect instruction together. The parfiles version attempts to maximize hardware utilization when processing many images, while the parslices version tries to accelerate single large image processing.
 
-## Preliminary Instructions
+![image](./proj1/benchmark/speedup-parslices.png)
+![image](./proj1/benchmark/speedup-parfiles.png)
 
- If you are unfamiliar
-with image convolutions then you should read over the following sources before
-beginning the assignment:
+## Observation
+1. For sequential version:
+The main hotspot in the sequential program is the convolution operation, which requires multiple nested loops and kernel calculations for each pixel. File I/O operations (reading/writing PNG files) create sequential bottlenecks since loading and writing large image files create latency.
+2. Comparison between two parallel versions:
+The parfiles version is faster than the parslices version because unlike the later version, the former one has less synchronization overhead since each image is processed independently. Also, the later one creates sequential bottlenecks while loading and saving large images.
+3. Image size impact:
+a. Parfiles: Mixture dataset performs worse than both, I suspect there exists overhead from handling varying image sizes?
+b. Parslices: Image size doesn’t matter much eventually when we use 12 workers. The program reaches a ~1.8x speedup with 12 threads for all types of dataset.
+4. Amdahl’s Law Analysis:
+a. For the parfiles version, the theoretical speed-up should be near-linear. This
+is due to the fact that each image is processed independently by a single thread/goroutine. Each goroutine handles its own file I/O individually and doesn’t have to wait between image effects. However, the discrepancies from the actual speed-up data could be derived from contention from shared system resource contention (SBATCH --nodes=1). In this sense, memory bandwidth also becomes a bottleneck since all threads share the same memory bus, thus affecting performance when multiple threads access different parts of memory. File I/O is also a bottleneck when multiple threads try to read/write images simultaneously.
+b. For the parslices version, the actual speed-ups align closer to theoretical values.
+5. Improvement:
+For parslices, instead of processing effects sequentially (image → slices → E1 → image → slices → E2…), we can create a pipeline in which multiple slices of the image move through the pipeline concurrently so that the program doesn’t have to wait between effects (multiples slices → E1 → E2 → E3 → E4 → image). And I think this can be done by the second option provided in the project instruction part3.
+
+## Preliminary Instructions
 
 -   [Two Dimensional
     Convolution](http://www.songho.ca/dsp/convolution/convolution2d_example.html)
@@ -174,21 +188,11 @@ will produce inside the `out` directory the following files:
     big_IMG_3695_Out.png 
     big_IMG_3696_Out.png 
     big_IMG_3996_Out.png 
-    big_IMG_4061_Out.png 
-    big_IMG_4065_Out.png
-    big_IMG_4066_Out.png 
-    big_IMG_4067_Out.png
-    big_IMG_4069_Out.png
     small_IMG_2020_Out.png 
     small_IMG_2724_Out.png 
     small_IMG_3695_Out.png 
     small_IMG_3696_Out.png 
     small_IMG_3996_Out.png 
-    small_IMG_4061_Out.png 
-    small_IMG_4065_Out.png
-    small_IMG_4066_Out.png 
-    small_IMG_4067_Out.png
-    small_IMG_4069_Out.png
 
 We will always provide valid command line arguments so you will only be
 given at most 3 specified identifiers for the `data_dir` argument. A
@@ -234,14 +238,6 @@ the `proj1/editor` directory so loading in files should be relative to
 that directory.
 
 ## Part 1: Sequential Implementation
-
-Inside the `proj1/scheduler/sequential.go` file, implement the function:
-
-``` go
-func RunSequential(config Config) {
-
-}
-```
 
 The sequential version is ran by default when executing the `editor`
 program when the `mode` and `number_of_threads` are both not provided.
@@ -325,24 +321,3 @@ A few options come to mind (bonus points for coming up with new ones):
 
 Your grade will depend on the performance, which is affected by how well you
 manage this fact and how well you avoid data copies. 
-
-## Part 4: Performance Measurements and Speedup Graphs
-
-Observation
-1. For sequential version:
-The main hotspot in the sequential program is the convolution operation, which requires multiple nested loops and kernel calculations for each pixel. File I/O operations (reading/writing PNG files) create sequential bottlenecks since loading and writing large image files create latency.
-2. Comparison between two parallel versions:
-The parfiles version is faster than the parslices version because unlike the later version, the former one has less synchronization overhead since each image is processed independently. Also, the later one creates sequential bottlenecks while loading and saving large images.
-3. Image size impact:
-a. Parfiles: Mixture dataset performs worse than both, I suspect there exists overhead from handling varying image sizes?
-b. Parslices: Image size doesn’t matter much eventually when we use 12 workers. The program reaches a ~1.8x speedup with 12 threads for all types of dataset.
-4. Amdahl’s Law Analysis:
-a. For the parfiles version, the theoretical speed-up should be near-linear. This
-is due to the fact that each image is processed independently by a single thread/goroutine. Each goroutine handles its own file I/O individually and doesn’t have to wait between image effects. However, the discrepancies from the actual speed-up data could be derived from contention from shared system resource contention (SBATCH --nodes=1). In this sense, memory bandwidth also becomes a bottleneck since all threads share the same memory bus, thus affecting performance when multiple threads access different parts of memory. File I/O is also a bottleneck when multiple threads try to read/write images simultaneously.
-b. For the parslices version, the actual speed-ups align closer to theoretical values.
-5. Improvement:
-For parslices, instead of processing effects sequentially (image → slices → E1 → image → slices → E2…), we can create a pipeline in which multiple slices of the image move through the pipeline concurrently so that the program doesn’t have to wait between effects (multiples slices → E1 → E2 → E3 → E4 → image). And I think this can be done by the second option provided in the project instruction part3.
-
-
-    ![image](./proj1/benchmark/speedup-parslices.png)
-    ![image](./proj1/benchmark/speedup-parfiles.png)
