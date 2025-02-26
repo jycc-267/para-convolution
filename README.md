@@ -1,23 +1,8 @@
-[![Open in Visual Studio Code](https://classroom.github.com/assets/open-in-vscode-2e0aaae1b6195c2367325f4f02e2d04e9abb55f0b24a779b69b11b9e10269abc.svg)](https://classroom.github.com/online_ide?assignment_repo_id=17867075&assignment_repo_type=AssignmentRepo)
 # Project \#1: An Image Processing System
 
-**See gradescope for due date**
+The project implements three versions of image editor that apply convolution effects on given images. The sequential version processes images one at a time without parallelism. Each image is fully loaded, effects are applied in-order using sequential convolution operations, and results are saved before moving to the next image. This version serves as the baseline for performance comparisons. The parfiles version spawns goroutines that compete to pull image tasks from a shared task queue protected by a TAS lock. After a goroutine acquires the lock, the image task along with a sequence of effects will then be executed independently. The parslices version processes an individual image by splitting it into slices. This version has each goroutine apply the same effect on their own slices, wait for all slices to be completed between effects, and move on to the next effect instruction together. The parfiles version attempts to maximize hardware utilization when processing many images, while the parslices version tries to accelerate single large image processing.
 
-This project is your first larger parallel program. You will likely use locks,
-waitgroups, and atomic variables. You will also identify performance
-bottlenecks and practice the use of Amdahl's law and speedup factors.
-
-## The general idea
-
-Your task is to create an image editor that will apply image effects on series
-of images using 2D image convolutions.  Many algorithms in image processing
-benefit from parallelization (especially those that run on GPUs). You will
-create an image processing system that runs on a CPU.
-You will be asked to create three implementations: a sequential baseline version,
-a version that processes multiple images in parallel (but each image is processed
-sequentially), and a version that parallelizes the processing of each image.
-
-## Preliminaries
+## Preliminary Instructions
 
  If you are unfamiliar
 with image convolutions then you should read over the following sources before
@@ -28,19 +13,11 @@ beginning the assignment:
 -   [Image Processing using
     Convolution](https://en.wikipedia.org/wiki/Kernel_(image_processing))
 
-The locations of input and output images, as well as the effects to apply will
-be communicated to your program using the JSON format. If you are unfamiliar
-with the JSON standard then you should read up on it before beginning the
-assignment. JSON is a widely used serialization format that you will mostly
-encounter at some point in your career. Thus, it's better that you learn it now
-so you can be comfortable with it in the future. How to work with JSON data
-inside Go is described here:
-
-  - [JSON in Go](https://blog.golang.org/json)
+Instruction on generating performance testing plots, run: ``sbatch benchmark-proj1.sh`` at ``./proj1/benchmark``. The test runs each combination of parallel version, number of threads, ``data_dir`` of image five times, and outputs the results into txt files at benchmark/results.
 
 ## Program Usage
 
-Your program will read from a series of JSON strings, where each string
+The program will read from a series of JSON strings, where each string
 represents an image along with the effects that should be applied to that
 image. Each string will have the following format,
 
@@ -82,11 +59,8 @@ The sharpen, edge-detection, and blur image effects are required to use
 image convolution to apply their effects to the input image.
 The size of the input and output image
 are fixed (i.e., they are the same). Thus, results around the border
-pixels will not be fully accurate because you will need to pad zeros
-where inputs are not defined. You are required to use the a zero-padding
-when working with pixels that are not defined. **You may not use a
-library or external source to perform the convolution for you. You must
-implement the convolution code yourself**. The grayscale effect uses a
+pixels will not be fully accurate since we will need to pad zeros
+where inputs are not defined. The grayscale effect uses a
 simple algorithm defined below that does not require convolution.
 
 Each effect is identified by a single character that is described below,
@@ -100,27 +74,21 @@ Each effect is identified by a single character that is described below,
 
 ## The `data` Directory
 
-Inside the `proj1` directory, You will need to download the `data`
-directory here:
+Inside the `proj1` directory, the image `data` can be downloaded here:
 
--   [Proj 1
-    Data](https://www.dropbox.com/s/cwse3i736ejcxpe/data.zip?dl=0) :
+-   [Proj 1 Data](https://www.dropbox.com/s/cwse3i736ejcxpe/data.zip?dl=0) :
     There should be a download arrow icon on the left side to download
     the zip folder.
-
-Place this directory inside the `proj1` directory that contains the
-subdirectories: `editor` and `png`. **DO NOT COMMIT THIS DIRECTORY TO
-YOUR REPOSITORY**. These are very large files and committing this
-directory will result in a penalty!
-
-Here is the structure of the `data` directory:
+-   Place this directory inside the `proj1` directory that contains the
+subdirectories: `editor` and `png`.
+-   Here is the structure of the `data` directory:
 
 | Directory/Files | Description  |
 |-----------------|--------------|
 | ``effects.txt`` |  This is the file that contains the string of JSONS that were described above. This will be the only file used for this program (and also for testing purposes). You must use a relative path to your ``proj1`` directory to open this file. For example, if you open this file from the ``editor.go`` file then you should open as ``../data/effects.txt``. |
 |  ``expected`` directory | This directory contains the expected filtered out image for each JSON string provided in the ``effects.txt``. We will only test your program against the images provided in this directory. Your  produced images do not need to look 100% like the provided output. If there are some slight differences based on rounding-error then that's fine for full credit. |
 |  ``in`` directory | This directory contains three subdirectories called: ``big``, ``mixture``, and ``small``. The actual images in each of these subdirectories are all the same, with the exception of their *image sizes*. The ``big`` directory has the best resolution of the images, ``small`` has a reduced resolution of the images, and the ``mixture`` directory has a mixture of both big and small sizes for different images. You must use a relative path to your ``proj1`` directory to open this file. For example, if you want to open the ``IMG_2029.png`` from the ``big`` directory from inside the ``editor.go`` file then you should open as ``../data/in/big/IMG_2029.png``. |
-| ``out`` directory | This is where you will place the ``outPath`` images when running the program. |
+| ``out`` directory | This is where the program will place the ``outPath`` images when running the program. |
 
 ### Working with Images in Go and Startup Code
 
@@ -130,11 +98,7 @@ the examples from these links:
 
 -   [Go PNG docs](https://golang.org/pkg/image/png/)
 -   A [helpful
-    tutorial](https://www.devdungeon.com/content/working-images-go) for
-    working on png images. Make sure to cite this website, if you are
-    going to use a similar structure to the code provided. The developer
-    directly accesses the `Pix` buffer. I would recommend you use the
-    `At()` and `Set()` methods as specified by the Go PNG documentation.
+    tutorial](https://www.devdungeon.com/content/working-images-go)
 
 > **Note**:
 > The image package only allows you to read an image data and not modify
@@ -364,42 +328,20 @@ manage this fact and how well you avoid data copies.
 
 ## Part 4: Performance Measurements and Speedup Graphs
 
-Please measure the performance of your code on the Linux cluster, and report
-your findings. You may measure program run times using terminal commands such
-as `time`, by adding timers to your code similar to what you saw in the
-examples presented during class, and/or by wrapping everything in a Python
-script and using Python's timing functions. You may use a combination of multiple
-approaches.
-
-
-1. Using just one thread, measure the overall time of your program, as well as
-   the time spent in the program parts that you are parallelizing. After obtaining
-   these numbers, use Amdahl's law to determine the speedup that you are expecting
-   for `{2,4,6,8,12}` threads. I want to see the original numbers and how you
-   used the formula to obtain the results. It is probably easiest if you create a
-   spreadsheet and submit this with your project, but it is also fine to write
-   the calculation step by step in your report.
-   You will observe that timings vary a little bit each time you run your program.
-   Please run every experiment at least 5 times, and use the best-observed time
-   from those runs.
-
-2. Use the same numbers and Amdahl's law to determine the speedup you might get
-   in the limit, with an infinite number of threads.
-
-3. Create speedup graphs. The y-axis will list the speedup measurement
-   and the x-axis will list the number of threads. As a reminder, the speedup is
-   the time for one thread, divided by the time for N threads.
-
-4.   Make make sure to title the graph, and label each axis.
-   Make sure to adjust your y-axis range so that we can accurately see
-   the values. That is, if most of your values fall between a range of
-   \[0,1\] then don't make your speedup range \[0,14\].
-
-5.  We will keep things simple and only look at
-   measuring single data directories: `small`, `mixture`, and `big`. Each speedup graph is based around a single parallel version
-   (e.g., `slice`) where each line represents running a specific data
-   directory. The set of threads will be `{2,4,6,8,12}` and will remain the
-   same for all speedup graphs.
+Observation
+1. For sequential version:
+The main hotspot in the sequential program is the convolution operation, which requires multiple nested loops and kernel calculations for each pixel. File I/O operations (reading/writing PNG files) create sequential bottlenecks since loading and writing large image files create latency.
+2. Comparison between two parallel versions:
+The parfiles version is faster than the parslices version because unlike the later version, the former one has less synchronization overhead since each image is processed independently. Also, the later one creates sequential bottlenecks while loading and saving large images.
+3. Image size impact:
+a. Parfiles: Mixture dataset performs worse than both, I suspect there exists overhead from handling varying image sizes?
+b. Parslices: Image size doesn’t matter much eventually when we use 12 workers. The program reaches a ~1.8x speedup with 12 threads for all types of dataset.
+4. Amdahl’s Law Analysis:
+a. For the parfiles version, the theoretical speed-up should be near-linear. This
+is due to the fact that each image is processed independently by a single thread/goroutine. Each goroutine handles its own file I/O individually and doesn’t have to wait between image effects. However, the discrepancies from the actual speed-up data could be derived from contention from shared system resource contention (SBATCH --nodes=1). In this sense, memory bandwidth also becomes a bottleneck since all threads share the same memory bus, thus affecting performance when multiple threads access different parts of memory. File I/O is also a bottleneck when multiple threads try to read/write images simultaneously.
+b. For the parslices version, the actual speed-ups align closer to theoretical values.
+5. Improvement:
+For parslices, instead of processing effects sequentially (image → slices → E1 → image → slices → E2…), we can create a pipeline in which multiple slices of the image move through the pipeline concurrently so that the program doesn’t have to wait between effects (multiples slices → E1 → E2 → E3 → E4 → image). And I think this can be done by the second option provided in the project instruction part3.
 
 
     ![image](./proj1/benchmark/speedup-parslices.png)
