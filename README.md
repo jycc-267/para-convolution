@@ -323,9 +323,16 @@ The task is to apply image effects on a series of images using 2D image convolut
 
 ---
 
-# Instruction
+# Introduction
 
-The test runs each image combination of `mode`, `[number of threads]`, and `data_dir` five times, and outputs the results into text files at `benchmark/results`.
+The task is to apply image effects on a series of images using 2D image convolutions.
+The project implements three versions of image editor that apply convolution effects on given images.
+The sequential version processes images one at a time without parallelism.
+Each image is fully loaded, effects are applied in-order using sequential convolution operations, and results are saved before moving to the next image.
+This version serves as the baseline for performance comparisons.
+The BSP version processes an individual image by splitting it into slices.
+This version has each goroutine apply the same effect on their own slices, wait for all slices to be completed between effects, and move on to the next effect instruction together.
+Finally, the BSP+Work-Stealing version allows the task (processing a series of images) to be split into smaller tasks, which are placed in a work queue such that a thread will steal work from other threads when idle.
 
 ### Generating Testing Plots
 ```
@@ -380,7 +387,6 @@ The BSP pattern is implemented using phase barriers to coordinate parallel execu
   - Synchronization overhead grows with thread count due to higher contention on the barrier’s mutex/cond variables.
 - The limitation of BSP-based design is that `SwapBuffers()` forces all threads to synchronize between effects, which is also a sequential bottleneck.
 
----
 
 ## BSP + Work-Stealing using Deque
 
@@ -410,7 +416,6 @@ A linked list of nodes with atomic operations on head/tail pointers.
 With M images and T threads:  
 Maximum steals ≈ M-T (vs M×T for per-slice stealing).
 
----
 
 ### Trade-off and Potential Risks
 
