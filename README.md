@@ -334,14 +334,25 @@ The BSP version processes an individual image by splitting it into slices.
 This version has each goroutine apply the same effect on their own slices, wait for all slices to be completed between effects, and move on to the next effect instruction together.
 Finally, the BSP+Work-Stealing version allows the task (processing a series of images) to be split into smaller tasks, which are placed in a work queue such that a thread will steal work from other threads when idle.
 
-### Generating Testing Plots
-```
-/proj3/benchmark$: sbatch benchmark-proj3.sh
-```
 
 ### Usage
+The test runs each image combination of `mode, [number of threads], and data_dir` five times, and outputs the results into text files at `benchmark/results`.
+
 ```
-go run editor.go data_dir mode [number of threads]
+Generating testing plots: /proj3/benchmark$: sbatch benchmark-proj3.sh
+
+Usage: go run editor.go data_dir mode [number of threads]
+
+    data_dir = The data directory to use to load the images
+
+    mode     = (s) run sequentially
+
+               (bsp) process slices of each image in parallel       
+
+               (bspsteal) bsp + work-stealing algorithm
+
+    [number of threads] = Runs the parallel version of the program with the specified number of threads
+
 ```
 
 - **data_dir**: The data directory to use to load the images.
