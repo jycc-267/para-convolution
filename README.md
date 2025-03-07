@@ -67,42 +67,9 @@ an image, and save the images to their specified output file paths. How
 the program processes this file is described in the **Program
 Specifications** section.
 
-## Image Effects
 
-The sharpen, edge-detection, and blur image effects are required to use
-image convolution to apply their effects to the input image.
-The size of the input and output image
-are fixed (i.e., they are the same). Thus, results around the border
-pixels will not be fully accurate since we will need to pad zeros
-where inputs are not defined. The grayscale effect uses a
-simple algorithm defined below that does not require convolution.
 
-Each effect is identified by a single character that is described below,
 
-| Image Effect | Description |
-| -------------|-------------|
-| ``"S"`` | Performs a sharpen effect with the following kernel (provided as a flat go array): ``[9]float6 {0,-1,0,-1,5,-1,0,-1,0}``. |
-| ``"E"`` | Performs an edge detection effect with the following kernel (provided as a flat go array): ``[9]float64{-1,-1,-1,-1,8,-1,-1,-1,-1}``. |
-| ``"B"`` | Performs a blur effect with the following kernel (provided as a flat go array): ``[9]float64{1 / 9.0, 1 / 9, 1 / 9.0, 1 / 9.0, 1 / 9.0, 1 / 9.0, 1 / 9.0, 1 / 9.0, 1 / 9.0}``. |
-| ``"G"`` | Performs a grayscale effect on the image. This is done by averaging the values of all three color numbers for a pixel, the red, green and blue, and then replacing them all by that average. So if the three colors were 25, 75 and 250, the average would be 116, and all three numbers would become 116. |
-
-## The `data` Directory
-
-Inside the `proj1` directory, the image `data` can be downloaded here:
-
--   [Proj 1 Data](https://www.dropbox.com/s/cwse3i736ejcxpe/data.zip?dl=0) :
-    There should be a download arrow icon on the left side to download
-    the zip folder.
--   Place this directory inside the `proj1` directory that contains the
-subdirectories: `editor` and `png`.
--   Here is the structure of the `data` directory:
-
-| Directory/Files | Description  |
-|-----------------|--------------|
-| ``effects.txt`` |  This is the file that contains the string of JSONS that were described above. This will be the only file used for this program (and also for testing purposes). You must use a relative path to your ``proj1`` directory to open this file. For example, if you open this file from the ``editor.go`` file then you should open as ``../data/effects.txt``. |
-|  ``expected`` directory | This directory contains the expected filtered out image for each JSON string provided in the ``effects.txt``. We will only test your program against the images provided in this directory. Your  produced images do not need to look 100% like the provided output. If there are some slight differences based on rounding-error then that's fine for full credit. |
-|  ``in`` directory | This directory contains three subdirectories called: ``big``, ``mixture``, and ``small``. The actual images in each of these subdirectories are all the same, with the exception of their *image sizes*. The ``big`` directory has the best resolution of the images, ``small`` has a reduced resolution of the images, and the ``mixture`` directory has a mixture of both big and small sizes for different images. You must use a relative path to your ``proj1`` directory to open this file. For example, if you want to open the ``IMG_2029.png`` from the ``big`` directory from inside the ``editor.go`` file then you should open as ``../data/in/big/IMG_2029.png``. |
-| ``out`` directory | This is where the program will place the ``outPath`` images when running the program. |
 
 ### Working with Images in Go and Startup Code
 
@@ -165,7 +132,7 @@ program as follows:
     $: go run editor.go big bsp 4 
 
 will produce inside the `out` directory the following files:
-
+s
     big_IMG_2020_Out.png 
     big_IMG_2724_Out.png 
     big_IMG_3695_Out.png 
@@ -237,71 +204,6 @@ this assignment. We will always run/grade your solutions by going inside
 the `proj1/editor` directory so loading in files should be relative to
 that directory.
 
-## Part 1: Sequential Implementation
-
-The sequential version is ran by default when executing the `editor`
-program when the `mode` and `number_of_threads` are both not provided.
-The sequential program is relatively straightforward. This version
-should run through the images specified by the strings coming in from
-`effects.txt`, apply their effects and save the modified images to their
-output files inside the `data/out` directory. Make sure to prepend the
-`data_dir` identifier.
-
-> **Note**:
-> You should implement the sequential version first. Make sure your code
-> is **modular** enough such that you can potentially reuse functions/data
-> structures later in your parallel version. Think about what libraries
-> and functions should be created. **We will consider code and design style
-> when grading this assignment**.
-
-You may find this code useful:
-
-``` go
-effectsPathFile := fmt.Sprintf("../data/effects.txt")
-effectsFile, _ := os.Open(effectsPathFile)
-reader := json.NewDecoder(effectsFile)
-```
-
-## Part 2: Multiple Images in Parallel
-
-The first parallel implementation will process multiple images in parallel,
-but each individual image is handled by only one thread. The code should be
-implemented as follows:
-
-1.  Create a queue, where each node contains all information about the tasks
-    related to an individual image (e.g. input file, output file, effects).
-    You can either implement your own queue (e.g. as a linked list), or use an
-    existing sequential data structure. The queue can be populated sequentially
-    while reading the JSON input strings. It does not matter if your queue is
-    FIFO or any other order.
-
-2.  Spawn Go routines. The number of Go routines should be the
-    number of threads specified in the command line, or the number of images in
-    the queue (whichever is smaller). The Go routines should take image tasks
-    from the queue and process them. You must implement your own TAS lock
-    to safeguard accesses to the queue, i.e. items can only be taken out of the
-    queue by a Go routine that holds the lock. **You cannot use any existing
-    thread-safe queue datastructures or locks**.
-
-3.  Go routines should run until all tasks from the queue are processed. The
-    main program should wait until all Go routines have terminated. This is
-    best implemented using a wait group; Please use the standard implementation
-    provided by Go.
-
-## Part 3: Parallelize Each Image
-
-In the second parallel implementation, you will parallelize the processing of
-individual images. For now, we assume that only one image is processed at a
-time. This should be done as follows:
-
-1.  Iterate over the same queue as in Part 2. For each image, spawn Go routines
-    that operate on slices of the image. You will probably want to use slicing
-    here, and take inspiration from the examples shown during class to compute the
-    start and end index that each Go routine needs to work on.
-2.  Let each Go routine apply effects to its own slice of the image.
-
-3.  Only start working on the next image when the current image is fully
-    processed. You can use waitgroups for this.
 
 
 # Task Introduction
@@ -355,26 +257,44 @@ Usage: go run editor.go data_dir mode [number of threads]
 
 ```
 
-- **data_dir**: The data directory to use to load the images.
-- **mode**:  
-  - `(s)` run sequentially  
-  - `(bsp)` process slices of each image in parallel  
-  - `(bspsteal)` BSP + work-stealing algorithm
-- **[number of threads]**: Runs the parallel version of the program with the specified number of threads.
-
----
-
 # Data Source
 
-Inside the `proj3` directory, the dataset directory should be downloaded and placed at the same level as subdirectories `editor` and `png`. Data can be downloaded: [here](#).
+Inside the `proj3` directory, the dataset directory should be downloaded and placed at the same level as subdirectories `editor` and `png`.
+Data can be downloaded: [here]((https://www.dropbox.com/s/cwse3i736ejcxpe/data.zip?dl=0).
+-   Here is the structure of the `data` directory:
 
----
+| Directory/Files | Description  |
+|-----------------|--------------|
+| ``effects.txt`` |  This is the file that contains the string of JSONS that were described above. This will be the only file used for this program (and also for testing purposes). You must use a relative path to your ``proj1`` directory to open this file. For example, if you open this file from the ``editor.go`` file then you should open as ``../data/effects.txt``. |
+|  ``expected`` directory | This directory contains the expected filtered out image for each JSON string provided in the ``effects.txt``. We will only test your program against the images provided in this directory. Your  produced images do not need to look 100% like the provided output. If there are some slight differences based on rounding-error then that's fine for full credit. |
+|  ``in`` directory | This directory contains three subdirectories called: ``big``, ``mixture``, and ``small``. The actual images in each of these subdirectories are all the same, with the exception of their *image sizes*. The ``big`` directory has the best resolution of the images, ``small`` has a reduced resolution of the images, and the ``mixture`` directory has a mixture of both big and small sizes for different images. You must use a relative path to your ``proj1`` directory to open this file. For example, if you want to open the ``IMG_2029.png`` from the ``big`` directory from inside the ``editor.go`` file then you should open as ``../data/in/big/IMG_2029.png``. |
+| ``out`` directory | This is where the program will place the ``outPath`` images when running the program. |
+
+## Image Effects
+
+The sharpen, edge-detection, and blur image effects are required to use
+image convolution to apply their effects to the input image.
+The size of the input and output image
+are fixed (i.e., they are the same). Thus, results around the border
+pixels will not be fully accurate since we will need to pad zeros
+where inputs are not defined. The grayscale effect uses a
+simple algorithm defined below that does not require convolution.
+
+Each effect is identified by a single character that is described below,
+
+| Image Effect | Description |
+| -------------|-------------|
+| ``"S"`` | Performs a sharpen effect with the following kernel (provided as a flat go array): ``[9]float6 {0,-1,0,-1,5,-1,0,-1,0}``. |
+| ``"E"`` | Performs an edge detection effect with the following kernel (provided as a flat go array): ``[9]float64{-1,-1,-1,-1,8,-1,-1,-1,-1}``. |
+| ``"B"`` | Performs a blur effect with the following kernel (provided as a flat go array): ``[9]float64{1 / 9.0, 1 / 9, 1 / 9.0, 1 / 9.0, 1 / 9.0, 1 / 9.0, 1 / 9.0, 1 / 9.0, 1 / 9.0}``. |
+| ``"G"`` | Performs a grayscale effect on the image. This is done by averaging the values of all three color numbers for a pixel, the red, green and blue, and then replacing them all by that average. So if the three colors were 25, 75 and 250, the average would be 116, and all three numbers would become 116. |
+
 
 # Sequential Hotspots
 
-The main hotspot in the sequential program is the convolution operation, which requires multiple nested loops and kernel calculations for each pixel. File I/O operations (reading/writing PNG files) create sequential bottlenecks since loading and writing large image files creates latency.
+The main hotspot in the sequential program is the convolution operation, which requires multiple nested loops and kernel calculations for each pixel.
+File I/O operations (reading/writing PNG files) create sequential bottlenecks since loading and writing large image files creates latency.
 
----
 
 # Parallel Implementations
 
