@@ -2,8 +2,8 @@
 
 The project implements three versions of image editor that apply convolution effects on given images. The sequential version processes images one at a time without parallelism. Each image is fully loaded, effects are applied in-order using sequential convolution operations, and results are saved before moving to the next image. This version serves as the baseline for performance comparisons. The parfiles version spawns goroutines that compete to pull image tasks from a shared task queue protected by a TAS lock. After a goroutine acquires the lock, the image task along with a sequence of effects will then be executed independently. The parslices version processes an individual image by splitting it into slices. This version has each goroutine apply the same effect on their own slices, wait for all slices to be completed between effects, and move on to the next effect instruction together. The parfiles version attempts to maximize hardware utilization when processing many images, while the parslices version tries to accelerate single large image processing.
 
-![image](./proj1/benchmark/speedup-parslices.png)
-![image](./proj1/benchmark/speedup-parfiles.png)
+![image](./proj3/benchmark/speedup-bsp.png)
+![image](./proj3/benchmark/speedup-bspsteal.png)
 
 ## Observation
 1. For sequential version:
@@ -303,21 +303,120 @@ time. This should be done as follows:
 3.  Only start working on the next image when the current image is fully
     processed. You can use waitgroups for this.
 
-A performance hint about this part:
 
- -  Take care to minimize the amount of data copying, i.e. pass pointers or
-    slices instead of copying chunks of data around all the time.
+# Task Introduction
 
-Convolutions have a slightly larger read set than write set, i.e. they read
-from more indices than they write to. If multiple effects E1, E2, ... are
-applied and slices are processed in parallel, you need to manage the fact that
-the output of E1 in one slice affects the input of E2 in neighboring slices.
-A few options come to mind (bonus points for coming up with new ones):
+The task is to apply image effects on a series of images using 2D image convolutions. The project implements three versions of an image editor that apply convolution effects on given images:
 
- - Use waitgroups so that nobody works on E2 before everyone has finished E1.
- - Give larger overlapping slices to Go routines, and let the slices shrink
-   with each effect so that the output slices have just the right
-   non-overlapping size when writing to the shared output.
+1. **Sequential Version**:  
+   - Processes images one at a time without parallelism.  
+   - Each image is fully loaded, effects are applied sequentially using convolution operations, and results are saved before moving to the next image.  
+   - Serves as the baseline for performance comparisons.
 
-Your grade will depend on the performance, which is affected by how well you
-manage this fact and how well you avoid data copies. 
+2. **BSP Version**:  
+   - Processes an individual image by splitting it into slices.  
+   - Each goroutine applies the same effect on its own slice, waits for all slices to complete between effects, and moves on to the next effect instruction together.
+
+3. **BSP + Work-Stealing Version**:  
+   - Allows the task (processing a series of images) to be split into smaller tasks, which are placed in a work queue.  
+   - Threads steal work from other threads when idle.
+
+---
+
+# Instruction
+
+The test runs each image combination of `mode`, `[number of threads]`, and `data_dir` five times, and outputs the results into text files at `benchmark/results`.
+
+### Generating Testing Plots
+```
+/proj3/benchmark$: sbatch benchmark-proj3.sh
+```
+
+### Usage
+```
+go run editor.go data_dir mode [number of threads]
+```
+
+- **data_dir**: The data directory to use to load the images.
+- **mode**:  
+  - `(s)` run sequentially  
+  - `(bsp)` process slices of each image in parallel  
+  - `(bspsteal)` BSP + work-stealing algorithm
+- **[number of threads]**: Runs the parallel version of the program with the specified number of threads.
+
+---
+
+# Data Source
+
+Inside the `proj3` directory, the dataset directory should be downloaded and placed at the same level as subdirectories `editor` and `png`. Data can be downloaded: [here](#).
+
+---
+
+# Sequential Hotspots
+
+The main hotspot in the sequential program is the convolution operation, which requires multiple nested loops and kernel calculations for each pixel. File I/O operations (reading/writing PNG files) create sequential bottlenecks since loading and writing large image files creates latency.
+
+---
+
+# Parallel Implementations
+
+## Bulk Synchronous Parallel (BSP)
+
+The BSP pattern is implemented using phase barriers to coordinate parallel execution of image effects where each effect (e.g., blur, edge detection) represents a superstep:
+
+1. Each image is divided into horizontal slices, with each goroutine processing a slice (e.g., `BSPConvolution()` in `effects.go` splits images into `numThreads` slices).  
+2. Within `BSPConvolution()`, a reusable `Barrier` struct ensures that the main thread and finished workers wait for all spawned sub-workers to complete their slice processing before advancing to the next effect.  
+3. After synchronization, `SwapBuffers()` exchanges input/output buffers for subsequent effects, preserving data consistency.
+
+### Design Rationale
+
+- This implementation offers advantages in terms of dependency management and predictable latency.  
+- Since specific convolutions require neighboring pixels, processing slices without waiting between effects could cause data races. Barriers ensure that no worker starts the next effect until all workers have finished the current one.  
+- Additionally, barriers bound the worst-case latency per effect.
+
+### Trade-off and Limitation
+
+- Using barriers introduces performance trade-offs:
+  - Synchronization overhead grows with thread count due to higher contention on the barrier’s mutex/cond variables.
+- The limitation of BSP-based design is that `SwapBuffers()` forces all threads to synchronize between effects, which is also a sequential bottleneck.
+
+---
+
+## BSP + Work-Stealing using Deque
+
+Compared to the pure BSP pattern, this version distributes image tasks (`ImageTask`) round-robin to worker deques. After `RunBSPSteal()` starts:
+
+1. Whenever a worker’s deque is empty, it steals tasks from others’ heads, ensuring high throughput under uneven workloads.
+
+### Structure of Deque for Work-Stealing Mechanism
+
+#### Deque
+A linked list of nodes with atomic operations on head/tail pointers.
+
+#### Operations
+- **Push/Pop (LIFO)**: Owner threads add/remove tasks at the tail using `CompareAndSwap` for thread safety.
+- **Steal (FIFO)**: Idle threads steal tasks from the head, minimizing contention via atomic pointer swaps.
+
+### Design Rationale
+
+- The mechanism provides excellent load balancing:
+  - ImageTasks vary in size and complexity (e.g., length of effects to apply).  
+  - Work-stealing prevents thread starvation when processing a mix of large and small images.
+- Per-image task granularity balances parallelism efficiency and synchronization overhead:
+  - Instead of dividing individual images into slices for stealing (which risks excessive fragmentation and cache thrashing), each image is treated as an atomic task.
+  - Workers process full images sequentially using BSP for intra-image parallelism, preserving spatial locality in pixel data while minimizing deque contention.
+
+#### Maximum Steals
+With M images and T threads:  
+Maximum steals ≈ M-T (vs M×T for per-slice stealing).
+
+---
+
+### Trade-off and Potential Risks
+
+- Per-image stealing reduces synchronization overhead but may lead to underutilization if some threads are assigned disproportionately large or complex tasks compared to others.
+- This design prioritizes simplicity over perfect load balancing:
+  - ImageTasks are distributed round-robin.
+  - By stealing entire images rather than slices:
+    - Workers avoid fine-grained synchronization.
+    - Predictable memory access patterns are maintained, which is critical for convolution-heavy effects that introduce pixel dependency.
