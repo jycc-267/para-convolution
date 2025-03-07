@@ -1,36 +1,39 @@
 # A Convolutional Image Processing System
+The task is to apply image effects on a series of images using 2D image convolutions. The project implements three versions of an image editor that apply convolution effects on given images:
 
-The project implements three versions of image editor that apply convolution effects on given images. The sequential version processes images one at a time without parallelism. Each image is fully loaded, effects are applied in-order using sequential convolution operations, and results are saved before moving to the next image. This version serves as the baseline for performance comparisons. The parfiles version spawns goroutines that compete to pull image tasks from a shared task queue protected by a TAS lock. After a goroutine acquires the lock, the image task along with a sequence of effects will then be executed independently. The parslices version processes an individual image by splitting it into slices. This version has each goroutine apply the same effect on their own slices, wait for all slices to be completed between effects, and move on to the next effect instruction together. The parfiles version attempts to maximize hardware utilization when processing many images, while the parslices version tries to accelerate single large image processing.
+1. **Sequential Version**:  
+   - Processes images one at a time without parallelism.  
+   - Each image is fully loaded, effects are applied sequentially using convolution operations, and results are saved before moving to the next image.  
+   - Serves as the baseline for performance comparisons.
 
-![image](./proj3/benchmark/speedup-bsp.png)
-![image](./proj3/benchmark/speedup-bspsteal.png)
+2. **BSP Version**:  
+   - Processes an individual image by splitting it into slices.  
+   - Each goroutine applies the same effect on its own slice, waits for all slices to complete between effects, and moves on to the next effect instruction together.
 
-## Observation
-1. For sequential version:
-The main hotspot in the sequential program is the convolution operation, which requires multiple nested loops and kernel calculations for each pixel. File I/O operations (reading/writing PNG files) create sequential bottlenecks since loading and writing large image files create latency.
-2. Comparison between two parallel versions:
-The parfiles version is faster than the parslices version because unlike the later version, the former one has less synchronization overhead since each image is processed independently. Also, the later one creates sequential bottlenecks while loading and saving large images.
-3. Image size impact:
-a. Parfiles: Mixture dataset performs worse than both, I suspect there exists overhead from handling varying image sizes?
-b. Parslices: Image size doesn’t matter much eventually when we use 12 workers. The program reaches a ~1.8x speedup with 12 threads for all types of dataset.
-4. Amdahl’s Law Analysis:
-a. For the parfiles version, the theoretical speed-up should be near-linear. This
-is due to the fact that each image is processed independently by a single thread/goroutine. Each goroutine handles its own file I/O individually and doesn’t have to wait between image effects. However, the discrepancies from the actual speed-up data could be derived from contention from shared system resource contention (SBATCH --nodes=1). In this sense, memory bandwidth also becomes a bottleneck since all threads share the same memory bus, thus affecting performance when multiple threads access different parts of memory. File I/O is also a bottleneck when multiple threads try to read/write images simultaneously.
-b. For the parslices version, the actual speed-ups align closer to theoretical values.
-5. Improvement:
-For parslices, instead of processing effects sequentially (image → slices → E1 → image → slices → E2…), we can create a pipeline in which multiple slices of the image move through the pipeline concurrently so that the program doesn’t have to wait between effects (multiples slices → E1 → E2 → E3 → E4 → image). And I think this can be done by the second option provided in the project instruction part3.
+3. **BSP + Work-Stealing Version**:  
+   - Allows the task (processing a series of images) to be split into smaller tasks, which are placed in a work queue.  
+   - Threads steal work from other threads when idle.
 
-## Preliminary Instructions
-
--   [Two Dimensional
-    Convolution](http://www.songho.ca/dsp/convolution/convolution2d_example.html)
--   [Image Processing using
-    Convolution](https://en.wikipedia.org/wiki/Kernel_(image_processing))
-
-Instruction on generating performance testing plots, run: ``sbatch benchmark-proj1.sh`` at ``./proj1/benchmark``. The test runs each combination of parallel version, number of threads, ``data_dir`` of image five times, and outputs the results into txt files at benchmark/results.
 
 ## Program Usage
+The test runs each image combination of `mode, [number of threads], and data_dir` five times, and outputs the results into text files at `benchmark/results`.
 
+```
+Generating testing plots: /proj3/benchmark$: sbatch benchmark-proj3.sh
+
+Usage: go run editor.go data_dir mode [number of threads]
+
+    data_dir = The data directory to use to load the images; use '+' to specify a combination run: go run editor.go big+small pipeline 2
+
+    mode     = (s) run sequentially
+
+               (bsp) process slices of each image in parallel       
+
+               (bspsteal) bsp + work-stealing algorithm
+
+    [number of threads] = Runs the parallel version of the program with the specified number of threads
+
+```
 The program will read from a series of JSON strings, where each string
 represents an image along with the effects that should be applied to that
 image. Each string will have the following format,
@@ -63,119 +66,11 @@ where each key-value is described in the table below,
 | ``"effects":["S"\,"B"\,"E"]`` | The ``"effects"`` pairing  represents the image effects to apply to the image. You must apply these in the order they are listed. If no effects are specified (e.g.\, ``[]``) then the out image is the same as the input image. |
 
 The program will read in the images, apply the effects associated with
-an image, and save the images to their specified output file paths. How
-the program processes this file is described in the **Program
-Specifications** section.
-
-
-
-
-
-### Working with Images in Go and Startup Code
-
-As part of the Go standard library, an `image` package is provided that
-makes it easy to load,read,and save PNG images. I recommend looking at
-the examples from these links:
-
--   [Go PNG docs](https://golang.org/pkg/image/png/)
--   A [helpful
-    tutorial](https://www.devdungeon.com/content/working-images-go)
-
-> **Note**:
-> The image package only allows you to read an image data and not modify
-> it in-place. You will need to create a separate out buffer to represent
-> the modified pixels. We have done this for you already in the `Image`
-> struct as follows:
-
-``` go
-type Image struct {
-  in  *image.RGBA64  // Think about swapping these between effects 
-  out *image.RGBA64  // Think about swapping these between effects 
-  Bounds  image.Rectangle
-  ... 
-} 
-```
-
-Feel free to reuse or modify this in your implementation. Remember these are
-**pointers** so you only need to swap the pointers to make the old out buffer
-the new in buffer when applying one effect after another effect.  This process
-is less expensive than copying pixel data after apply each effect.
-
-To help you get started, I provide code for loading, saving, performing
-the grayscale effect on a png image. You are not required to use this
-code and you can modify it as you wish. This code is already inside the
-`proj1/sample/sample.go` directory. You can run this sample program by
-going into the `proj1/sample` directory typing in the following command:
-
-    $: go run sample.go test_img.png 
-
-## Program Specifications
-
-For this project, You will implement three versions of this image
-processing system. The versions will include a sequential version and
-two parallel versions.
-
-The running of these various versions have already been setup for you
-inside the `proj1/editor/editor.go` file.
-
-The `data_dir` argument will always be either `big`, `small`, or
-`mixture` or a combination between them. The program will always read
-from the `data/effects.txt` file; however, the `data_dir` argument
-specifies which directory to use. The user can also add a `+` to perform
-the effects on multiple directories. For example, `big` will apply the
-`effects.txt` file on the images coming from the `big` directory. The
-argument `big+small` will apply the `effects.txt` file on both the `big`
-and `small` directory. The program must always prepend the `data_dir`
-identifier to the beginning of the `outPath`. For example, running the
-program as follows:
-
-    $: go run editor.go big bsp 4 
-
-will produce inside the `out` directory the following files:
-s
-    big_IMG_2020_Out.png 
-    big_IMG_2724_Out.png 
-    big_IMG_3695_Out.png 
-    big_IMG_3696_Out.png 
-    big_IMG_3996_Out.png 
-    big_IMG_4061_Out.png 
-    big_IMG_4065_Out.png
-    big_IMG_4066_Out.png 
-    big_IMG_4067_Out.png
-    big_IMG_4069_Out.png
-
-Here's an example of a combination run:
-
-    $: go run editor.go big+small pipeline 2
-
-will produce inside the `out` directory the following files:
-
-    big_IMG_2020_Out.png 
-    big_IMG_2724_Out.png 
-    big_IMG_3695_Out.png 
-    big_IMG_3696_Out.png 
-    big_IMG_3996_Out.png 
-    small_IMG_2020_Out.png 
-    small_IMG_2724_Out.png 
-    small_IMG_3695_Out.png 
-    small_IMG_3696_Out.png 
-    small_IMG_3996_Out.png 
-
-We will always provide valid command line arguments so you will only be
-given at most 3 specified identifiers for the `data_dir` argument. A
-single `+` will always be used to separate the identifiers with no
-whitespace.
-
-The `mode` and `number_of_threads` arguments will be used to run one of
-the parallel versions. Parts 2 and 3 will discuss these arguments in
-more detail. If the `mode` and `number_of_threads` arguments are not
-provided then the program will default to running the sequential
-version, which is discussed in Part 1.
+an image, and save the images to their specified output file paths.
 
 The scheduling (i.e., running) of the various implementations is handled
-by the `scheduler` package defined in `proj1/scheduler` directory. The
-`editor.go` program will create a configuration object (similar to
-project 1) using the following struct:
+by the `scheduler` package defined in `proj3/scheduler` directory. The
+`editor.go` program will create a configuration object using the following struct:
 
 ``` go
 type Config struct {
@@ -185,82 +80,10 @@ type Config struct {
 }
 ```
 
-The `Schedule` function inside the `scheduler/scheduler.go` file
-will then call the correct version to run based on the `Mode` field of
-the configuration value. Each of the functions to begin running the
-various implementation will be explained in the following sections.
-**You cannot modify any of the code in the
-\`\`proj1/scheduler/scheduler.go\`\` or \`\`proj1/editor/editor.go\`\`
-file**.
-
-**Additional Assumptions**: No error checking is needed to be done to
-the strings coming in from *effects.txt*. You can assume the JSON
-strings will contain valid values and provided in the format described
-above. We will always provide the correct command line arguments and in
-the correct order. The `expected` directory in `proj1/data` is based on
-only running the small dataset. Thus, the resolution for mixture and big
-modes will make the images appear slightly different. This is okay for
-this assignment. We will always run/grade your solutions by going inside
-the `proj1/editor` directory so loading in files should be relative to
-that directory.
-
-
-
-# Task Introduction
-
-The task is to apply image effects on a series of images using 2D image convolutions. The project implements three versions of an image editor that apply convolution effects on given images:
-
-1. **Sequential Version**:  
-   - Processes images one at a time without parallelism.  
-   - Each image is fully loaded, effects are applied sequentially using convolution operations, and results are saved before moving to the next image.  
-   - Serves as the baseline for performance comparisons.
-
-2. **BSP Version**:  
-   - Processes an individual image by splitting it into slices.  
-   - Each goroutine applies the same effect on its own slice, waits for all slices to complete between effects, and moves on to the next effect instruction together.
-
-3. **BSP + Work-Stealing Version**:  
-   - Allows the task (processing a series of images) to be split into smaller tasks, which are placed in a work queue.  
-   - Threads steal work from other threads when idle.
-
----
-
-# Introduction
-
-The task is to apply image effects on a series of images using 2D image convolutions.
-The project implements three versions of image editor that apply convolution effects on given images.
-The sequential version processes images one at a time without parallelism.
-Each image is fully loaded, effects are applied in-order using sequential convolution operations, and results are saved before moving to the next image.
-This version serves as the baseline for performance comparisons.
-The BSP version processes an individual image by splitting it into slices.
-This version has each goroutine apply the same effect on their own slices, wait for all slices to be completed between effects, and move on to the next effect instruction together.
-Finally, the BSP+Work-Stealing version allows the task (processing a series of images) to be split into smaller tasks, which are placed in a work queue such that a thread will steal work from other threads when idle.
-
-
-### Usage
-The test runs each image combination of `mode, [number of threads], and data_dir` five times, and outputs the results into text files at `benchmark/results`.
-
-```
-Generating testing plots: /proj3/benchmark$: sbatch benchmark-proj3.sh
-
-Usage: go run editor.go data_dir mode [number of threads]
-
-    data_dir = The data directory to use to load the images
-
-    mode     = (s) run sequentially
-
-               (bsp) process slices of each image in parallel       
-
-               (bspsteal) bsp + work-stealing algorithm
-
-    [number of threads] = Runs the parallel version of the program with the specified number of threads
-
-```
-
-# Data Source
+## Data Source
 
 Inside the `proj3` directory, the dataset directory should be downloaded and placed at the same level as subdirectories `editor` and `png`.
-Data can be downloaded: [here]((https://www.dropbox.com/s/cwse3i736ejcxpe/data.zip?dl=0).
+Data can be downloaded: [here](https://www.dropbox.com/s/cwse3i736ejcxpe/data.zip?dl=0).
 -   Here is the structure of the `data` directory:
 
 | Directory/Files | Description  |
@@ -290,15 +113,15 @@ Each effect is identified by a single character that is described below,
 | ``"G"`` | Performs a grayscale effect on the image. This is done by averaging the values of all three color numbers for a pixel, the red, green and blue, and then replacing them all by that average. So if the three colors were 25, 75 and 250, the average would be 116, and all three numbers would become 116. |
 
 
-# Sequential Hotspots
+## Sequential Hotspots
 
 The main hotspot in the sequential program is the convolution operation, which requires multiple nested loops and kernel calculations for each pixel.
 File I/O operations (reading/writing PNG files) create sequential bottlenecks since loading and writing large image files creates latency.
 
 
-# Parallel Implementations
+## Parallel Implementations
 
-## Bulk Synchronous Parallel (BSP)
+### Bulk Synchronous Parallel (BSP)
 
 The BSP pattern is implemented using phase barriers to coordinate parallel execution of image effects where each effect (e.g., blur, edge detection) represents a superstep:
 
@@ -306,35 +129,37 @@ The BSP pattern is implemented using phase barriers to coordinate parallel execu
 2. Within `BSPConvolution()`, a reusable `Barrier` struct ensures that the main thread and finished workers wait for all spawned sub-workers to complete their slice processing before advancing to the next effect.  
 3. After synchronization, `SwapBuffers()` exchanges input/output buffers for subsequent effects, preserving data consistency.
 
-### Design Rationale
+![image](./proj3/benchmark/speedup-bsp.png)
+
+#### Design Rationale
 
 - This implementation offers advantages in terms of dependency management and predictable latency.  
 - Since specific convolutions require neighboring pixels, processing slices without waiting between effects could cause data races. Barriers ensure that no worker starts the next effect until all workers have finished the current one.  
 - Additionally, barriers bound the worst-case latency per effect.
 
-### Trade-off and Limitation
+#### Trade-off and Limitation
 
 - Using barriers introduces performance trade-offs:
   - Synchronization overhead grows with thread count due to higher contention on the barrier’s mutex/cond variables.
 - The limitation of BSP-based design is that `SwapBuffers()` forces all threads to synchronize between effects, which is also a sequential bottleneck.
 
 
-## BSP + Work-Stealing using Deque
+### BSP + Work-Stealing using Deque
 
 Compared to the pure BSP pattern, this version distributes image tasks (`ImageTask`) round-robin to worker deques. After `RunBSPSteal()` starts:
 
 1. Whenever a worker’s deque is empty, it steals tasks from others’ heads, ensuring high throughput under uneven workloads.
 
-### Structure of Deque for Work-Stealing Mechanism
-
-#### Deque
+#### Structure of Deque for Work-Stealing Mechanism
 A linked list of nodes with atomic operations on head/tail pointers.
 
 #### Operations
 - **Push/Pop (LIFO)**: Owner threads add/remove tasks at the tail using `CompareAndSwap` for thread safety.
 - **Steal (FIFO)**: Idle threads steal tasks from the head, minimizing contention via atomic pointer swaps.
 
-### Design Rationale
+![image](./proj3/benchmark/speedup-bspsteal.png)
+
+#### Design Rationale
 
 - The mechanism provides excellent load balancing:
   - ImageTasks vary in size and complexity (e.g., length of effects to apply).  
@@ -342,13 +167,10 @@ A linked list of nodes with atomic operations on head/tail pointers.
 - Per-image task granularity balances parallelism efficiency and synchronization overhead:
   - Instead of dividing individual images into slices for stealing (which risks excessive fragmentation and cache thrashing), each image is treated as an atomic task.
   - Workers process full images sequentially using BSP for intra-image parallelism, preserving spatial locality in pixel data while minimizing deque contention.
-
-#### Maximum Steals
-With M images and T threads:  
-Maximum steals ≈ M-T (vs M×T for per-slice stealing).
+- With M images and T threads: Maximum steals ≈ M-T (vs M×T for per-slice stealing).
 
 
-### Trade-off and Potential Risks
+#### Trade-off and Potential Risks
 
 - Per-image stealing reduces synchronization overhead but may lead to underutilization if some threads are assigned disproportionately large or complex tasks compared to others.
 - This design prioritizes simplicity over perfect load balancing:
@@ -356,3 +178,39 @@ Maximum steals ≈ M-T (vs M×T for per-slice stealing).
   - By stealing entire images rather than slices:
     - Workers avoid fine-grained synchronization.
     - Predictable memory access patterns are maintained, which is critical for convolution-heavy effects that introduce pixel dependency.
+
+## Appendix
+
+### Convolution Filter
+
+-   [Two Dimensional
+    Convolution](http://www.songho.ca/dsp/convolution/convolution2d_example.html)
+-   [Image Processing using
+    Convolution](https://en.wikipedia.org/wiki/Kernel_(image_processing))
+
+### Working with Images in Go and Startup Code
+
+As part of the Go standard library, an `image` package is provided that
+makes it easy to load,read,and save PNG images:
+
+-   [Go PNG docs](https://golang.org/pkg/image/png/)
+-   A [helpful
+    tutorial](https://www.devdungeon.com/content/working-images-go)
+
+> **Note**:
+> The image package only allows reading an image data and not modify
+> it in-place. We will need to create a separate out buffer to represent
+> the modified pixels.
+
+``` go
+type Image struct {
+  in  *image.RGBA64  // Think about swapping these between effects 
+  out *image.RGBA64  // Think about swapping these between effects 
+  Bounds  image.Rectangle
+  ... 
+} 
+```
+
+Remember these are **pointers** so you only need to swap the pointers to make the old out buffer
+the new in buffer when applying one effect after another effect.  This process
+is less expensive than copying pixel data after apply each effect.
